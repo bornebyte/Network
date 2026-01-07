@@ -1,14 +1,17 @@
-asgiref==3.5.0
-autopep8==1.6.0
-beautifulsoup4==4.10.0
-certifi==2021.10.8
-cffi==1.15.0
-charset-normalizer==2.0.12
-comtypes==1.1.11
-dj-database-url==0.5.0
-Django==4.0.2
-django-autoslug==1.9.8
-django-heroku==0.3.1
-django-tinymce==3.4.0
-gunicorn==20.1.0
-requests==2.27.1
+# Core Django
+Django>=5.1,<5.2
+asgiref>=3.8.1
+
+# Production server
+gunicorn>=23.0.0
+whitenoise>=6.7.0
+
+# Image handling
+Pillow>=11.0.0
+
+# Utilities
+python-decouple>=3.8
+
+# Optional: if you need these features
+beautifulsoup4>=4.12.3
+requests>=2.32.3

@@ -63,9 +63,7 @@ def register(request):
         fname = request.POST["firstname"]
         lname = request.POST["lastname"]
         profile = request.FILES.get("profile")
-        print(f"--------------------------Profile: {profile}----------------------------")
         cover = request.FILES.get('cover')
-        print(f"--------------------------Cover: {cover}----------------------------")
 
         # Ensure password matches confirmation
         password = request.POST["password"]
@@ -82,9 +80,9 @@ def register(request):
             user.last_name = lname
             if profile is not None:
                 user.profile_pic = profile
-            else:
-                user.profile_pic = "profile_pic/no_pic.png"
-            user.cover = cover           
+            # Note: If no profile pic is provided, it will remain empty (ImageField allows blank=True)
+            if cover is not None:
+                user.cover = cover           
             user.save()
             Follower.objects.create(user=user)
         except IntegrityError:
@@ -99,7 +97,11 @@ def register(request):
 
 
 def profile(request, username):
-    user = User.objects.get(username=username)
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        return HttpResponse("User not found", status=404)
+    
     all_posts = Post.objects.filter(creater=user).order_by('-date_created')
     paginator = Paginator(all_posts, 10)
     page_number = request.GET.get('page')
@@ -113,10 +115,12 @@ def profile(request, username):
         followings = Follower.objects.filter(followers=request.user).values_list('user', flat=True)
         suggestions = User.objects.exclude(pk__in=followings).exclude(username=request.user.username).order_by("?")[:6]
 
-        if request.user in Follower.objects.get(user=user).followers.all():
+        follower_obj = Follower.objects.filter(user=user).first()
+        if follower_obj and request.user in follower_obj.followers.all():
             follower = True
     
-    follower_count = Follower.objects.get(user=user).followers.all().count()
+    follower_obj = Follower.objects.filter(user=user).first()
+    follower_count = follower_obj.followers.all().count() if follower_obj else 0
     following_count = Follower.objects.filter(followers=user).count()
     return render(request, 'network/profile.html', {
         "username": user,
@@ -179,9 +183,9 @@ def create_post(request):
             post = Post.objects.create(creater=request.user, content_text=text, content_image=pic)
             return HttpResponseRedirect(reverse('index'))
         except Exception as e:
-            return HttpResponse(e)
+            return HttpResponse(str(e), status=500)
     else:
-        return HttpResponse("Method must be 'POST'")
+        return HttpResponse("Method must be 'POST'", status=405)
 
 @login_required
 @csrf_exempt
@@ -191,51 +195,46 @@ def edit_post(request, post_id):
         pic = request.FILES.get('picture')
         img_chg = request.POST.get('img_change')
         post_id = request.POST.get('id')
-        post = Post.objects.get(id=post_id)
         try:
+            post = Post.objects.get(id=post_id)
+            if post.creater != request.user:
+                return JsonResponse({"success": False, "error": "Unauthorized"}, status=403)
+            
             post.content_text = text
             if img_chg != 'false':
                 post.content_image = pic
             post.save()
             
-            if(post.content_text):
-                post_text = post.content_text
-            else:
-                post_text = False
-            if(post.content_image):
-                post_image = post.img_url()
-            else:
-                post_image = False
+            post_text = post.content_text if post.content_text else False
+            post_image = post.img_url() if post.content_image else False
             
             return JsonResponse({
                 "success": True,
                 "text": post_text,
                 "picture": post_image
             })
+        except Post.DoesNotExist:
+            return JsonResponse({"success": False, "error": "Post not found"}, status=404)
         except Exception as e:
-            print('-----------------------------------------------')
-            print(e)
-            print('-----------------------------------------------')
-            return JsonResponse({
-                "success": False
-            })
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
     else:
-            return HttpResponse("Method must be 'POST'")
+        return HttpResponse("Method must be 'POST'", status=405)
 
 @csrf_exempt
 def like_post(request, id):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            post = Post.objects.get(pk=id)
-            print(post)
             try:
+                post = Post.objects.get(pk=id)
                 post.likers.add(request.user)
                 post.save()
                 return HttpResponse(status=204)
+            except Post.DoesNotExist:
+                return HttpResponse("Post not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -243,16 +242,17 @@ def like_post(request, id):
 def unlike_post(request, id):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            post = Post.objects.get(pk=id)
-            print(post)
             try:
+                post = Post.objects.get(pk=id)
                 post.likers.remove(request.user)
                 post.save()
                 return HttpResponse(status=204)
+            except Post.DoesNotExist:
+                return HttpResponse("Post not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -260,16 +260,17 @@ def unlike_post(request, id):
 def save_post(request, id):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            post = Post.objects.get(pk=id)
-            print(post)
             try:
+                post = Post.objects.get(pk=id)
                 post.savers.add(request.user)
                 post.save()
                 return HttpResponse(status=204)
+            except Post.DoesNotExist:
+                return HttpResponse("Post not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -277,16 +278,17 @@ def save_post(request, id):
 def unsave_post(request, id):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            post = Post.objects.get(pk=id)
-            print(post)
             try:
+                post = Post.objects.get(pk=id)
                 post.savers.remove(request.user)
                 post.save()
                 return HttpResponse(status=204)
+            except Post.DoesNotExist:
+                return HttpResponse("Post not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -294,18 +296,18 @@ def unsave_post(request, id):
 def follow(request, username):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            user = User.objects.get(username=username)
-            print(f".....................User: {user}......................")
-            print(f".....................Follower: {request.user}......................")
             try:
+                user = User.objects.get(username=username)
                 (follower, create) = Follower.objects.get_or_create(user=user)
                 follower.followers.add(request.user)
                 follower.save()
                 return HttpResponse(status=204)
+            except User.DoesNotExist:
+                return HttpResponse("User not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -313,18 +315,20 @@ def follow(request, username):
 def unfollow(request, username):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            user = User.objects.get(username=username)
-            print(f".....................User: {user}......................")
-            print(f".....................Unfollower: {request.user}......................")
             try:
+                user = User.objects.get(username=username)
                 follower = Follower.objects.get(user=user)
                 follower.followers.remove(request.user)
                 follower.save()
                 return HttpResponse(status=204)
+            except User.DoesNotExist:
+                return HttpResponse("User not found", status=404)
+            except Follower.DoesNotExist:
+                return HttpResponse("Follower relationship not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -333,22 +337,29 @@ def unfollow(request, username):
 def comment(request, post_id):
     if request.user.is_authenticated:
         if request.method == 'POST':
-            data = json.loads(request.body)
-            comment = data.get('comment_text')
-            post = Post.objects.get(id=post_id)
             try:
-                newcomment = Comment.objects.create(post=post,commenter=request.user,comment_content=comment)
+                data = json.loads(request.body)
+                comment_text = data.get('comment_text')
+                post = Post.objects.get(id=post_id)
+                newcomment = Comment.objects.create(
+                    post=post,
+                    commenter=request.user,
+                    comment_content=comment_text
+                )
                 post.comment_count += 1
                 post.save()
-                print(newcomment.serialize())
                 return JsonResponse([newcomment.serialize()], safe=False, status=201)
+            except Post.DoesNotExist:
+                return HttpResponse("Post not found", status=404)
             except Exception as e:
-                return HttpResponse(e)
+                return HttpResponse(str(e), status=500)
     
-        post = Post.objects.get(id=post_id)
-        comments = Comment.objects.filter(post=post)
-        comments = comments.order_by('-comment_time').all()
-        return JsonResponse([comment.serialize() for comment in comments], safe=False)
+        try:
+            post = Post.objects.get(id=post_id)
+            comments = Comment.objects.filter(post=post).order_by('-comment_time').all()
+            return JsonResponse([comment.serialize() for comment in comments], safe=False)
+        except Post.DoesNotExist:
+            return JsonResponse([], safe=False)
     else:
         return HttpResponseRedirect(reverse('login'))
 
@@ -356,16 +367,18 @@ def comment(request, post_id):
 def delete_post(request, post_id):
     if request.user.is_authenticated:
         if request.method == 'PUT':
-            post = Post.objects.get(id=post_id)
-            if request.user == post.creater:
-                try:
-                    delet = post.delete()
-                    return HttpResponse(status=201)
-                except Exception as e:
-                    return HttpResponse(e)
-            else:
-                return HttpResponse(status=404)
+            try:
+                post = Post.objects.get(id=post_id)
+                if request.user == post.creater:
+                    post.delete()
+                    return HttpResponse(status=204)
+                else:
+                    return HttpResponse("Unauthorized", status=403)
+            except Post.DoesNotExist:
+                return HttpResponse("Post not found", status=404)
+            except Exception as e:
+                return HttpResponse(str(e), status=500)
         else:
-            return HttpResponse("Method must be 'PUT'")
+            return HttpResponse("Method must be 'PUT'", status=405)
     else:
         return HttpResponseRedirect(reverse('login'))
